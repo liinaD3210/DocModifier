@@ -38,7 +38,7 @@ if 'warning_message' not in st.session_state:
 
 uploaded_file = st.file_uploader("1. Загрузите .docx шаблон", type=["docx"], key="file_uploader")
 user_query = st.text_input(
-    "2. Опишите, что нужно изменить (например, 'Измени дату договора на 24.04.2025')", 
+    "2. Опишите, что нужно изменить (например, 'Измени дату договора на 24.04.2025')",
     key="user_query_input"
 )
 
@@ -58,35 +58,35 @@ if st.button("3. Обработать документ", key="process_button"):
                 # Его нужно "перематывать" или читать каждый раз заново, если он используется несколько раз.
                 # Сохраняем содержимое файла, чтобы использовать его несколько раз
                 file_bytes = uploaded_file.getvalue()
-                
+
                 # 1. Чтение документа для извлечения текста
                 doc_for_text_extraction = Document(BytesIO(file_bytes))
                 doc_content_text = extract_text_from_doc(doc_for_text_extraction)
 
                 # Нода 1: LLM
                 llm_result = get_llm_instruction(doc_content_text, user_query)
-                
+
                 if not llm_result or not llm_result.get("old_text") or not llm_result.get("new_text"):
                     st.session_state.error_message = "LLM не смогла определить, что и на что нужно заменить. Попробуйте переформулировать запрос или убедитесь, что исходный текст существует в документе."
                 else:
                     old_text = llm_result["old_text"]
                     new_text = llm_result["new_text"]
-                    
+
                     st.session_state.info_message = f"LLM предлагает заменить: «{old_text}» на «{new_text}»"
-                    
+
                     # Нода 2: Создание объекта документа для модификации и сама модификация
                     # Используем сохраненные байты для создания нового объекта Document
                     doc_to_modify = Document(BytesIO(file_bytes))
-                    
+
                     modifications_made = modify_docx(doc_to_modify, old_text, new_text)
 
                     if modifications_made:
                         st.session_state.info_message += "\nИзменения успешно внесены!" # Дополняем сообщение
-                        
+
                         bio = BytesIO()
                         doc_to_modify.save(bio)
                         bio.seek(0)
-                        
+
                         st.session_state.modified_doc_bytes = bio.getvalue()
                         st.session_state.original_file_name = uploaded_file.name
                         st.session_state.processing_done = True
@@ -102,16 +102,16 @@ if st.button("3. Обработать документ", key="process_button"):
                 st.session_state.error_message = f"Произошла ошибка: {e}"
                 import traceback
                 st.session_state.error_message += f"\n\nTraceback:\n{traceback.format_exc()}"
-            
+
             # Сбрасываем виджеты, чтобы инициировать перерисовку с новыми сообщениями
-            st.experimental_rerun()
+            st.rerun() # <--- ИЗМЕНЕНО ЗДЕСЬ
 
     elif not uploaded_file:
         st.session_state.warning_message = "Пожалуйста, загрузите .docx файл."
-        st.experimental_rerun()
+        st.rerun() # <--- ИЗМЕНЕНО ЗДЕСЬ
     elif not user_query:
         st.session_state.warning_message = "Пожалуйста, введите запрос на изменение."
-        st.experimental_rerun()
+        st.rerun() # <--- ИЗМЕНЕНО ЗДЕСЬ
 
 # Отображение сообщений и кнопки скачивания после обработки
 if st.session_state.error_message:
