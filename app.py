@@ -3,14 +3,22 @@ from docx import Document
 from io import BytesIO
 import os
 
+# Импорт из новых модулей
 try:
-    # Используем новое имя функции
-    from doc_proc import get_llm_instructions_list, modify_docx, extract_text_from_doc
-except ImportError:
-    st.error("Ошибка: Не удалось импортировать 'document_processor.py'.")
+    from core.llm_handler import get_llm_instructions_list
+    from core.docx_modifier import modify_docx, extract_text_from_doc
+except ImportError as e:
+    st.error(f"Ошибка импорта модулей из 'core': {e}. "
+             "Убедитесь, что папка 'core' существует и содержит __init__.py, "
+             "llm_handler.py, docx_modifier.py.")
     st.write(f"Текущая рабочая директория: {os.getcwd()}")
-    st.write(f"Файл 'document_processor.py' существует: {os.path.exists('doc_proc.py')}")
+    st.write(f"Содержимое CWD: {os.listdir('.')}")
+    if os.path.exists('core'):
+        st.write(f"Содержимое core: {os.listdir('core')}")
     st.stop()
+
+# --- Остальной код app.py остается таким же, как в вашем предыдущем варианте ---
+# (где обрабатывается список инструкций и вызывается modify_docx для каждой)
 
 st.set_page_config(layout="wide")
 st.title("LLM Агент для редактирования .docx шаблонов")
@@ -21,35 +29,36 @@ default_session_state = {
     'modified_doc_bytes': None,
     'original_file_name': None,
     'error_message': None,
-    'info_messages': [], # Теперь список для нескольких сообщений
-    'warning_messages': [] # Теперь список
+    'info_messages': [], 
+    'warning_messages': [] 
 }
 for key, value in default_session_state.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
 uploaded_file = st.file_uploader("1. Загрузите .docx шаблон", type=["docx"], key="file_uploader")
-user_query = st.text_area( # Используем text_area для более длинных запросов
-    "2. Опишите, что нужно изменить (можно несколько правок, например, 'Измени цену на 100 руб и дату на 01.01.2025')",
+user_query = st.text_area(
+    "2. Опишите, что нужно изменить (можно несколько правок)",
     key="user_query_input", height=100
 )
 
 if st.button("3. Обработать документ", key="process_button"):
+    # Сброс состояния перед новой обработкой
     st.session_state.processing_done = False
     st.session_state.modified_doc_bytes = None
     st.session_state.original_file_name = None
     st.session_state.error_message = None
-    st.session_state.info_messages = [] # Очищаем списки
+    st.session_state.info_messages = []
     st.session_state.warning_messages = []
 
     if uploaded_file and user_query:
         with st.spinner("Анализ документа и применение изменений..."):
             try:
                 file_bytes = uploaded_file.getvalue()
+                # Используем BytesIO для создания объекта Document, т.к. он нужен дважды
                 doc_for_text_extraction = Document(BytesIO(file_bytes))
                 doc_content_text = extract_text_from_doc(doc_for_text_extraction)
 
-                # Нода 1: LLM (получаем список инструкций)
                 llm_instructions = get_llm_instructions_list(doc_content_text, user_query)
                 
                 if not llm_instructions:
@@ -65,49 +74,53 @@ if st.button("3. Обработать документ", key="process_button"):
                             f"  {i+1}. Заменить: «{instruction['old_text']}» на «{instruction['new_text']}»"
                         )
                     
-                    # Нода 2: Применение правок
-                    # Создаем объект документа ОДИН РАЗ для всех модификаций
-                    doc_to_modify = Document(BytesIO(file_bytes))
+                    doc_to_modify = Document(BytesIO(file_bytes)) # Новый объект для модификации
                     any_modification_successful = False
                     
                     for i, instruction in enumerate(llm_instructions):
                         old_text = instruction["old_text"]
                         new_text = instruction["new_text"]
                         
-                        st.session_state.info_messages.append(
-                            f"Применение правки {i+1}/{len(llm_instructions)}: «{old_text}» -> «{new_text}»"
-                        )
+                        # st.session_state.info_messages.append( # Это сообщение дублируется с DEBUG из modify_docx
+                        #     f"Применение правки {i+1}/{len(llm_instructions)}: «{old_text}» -> «{new_text}»"
+                        # )
                         
-                        # Применяем КАЖДУЮ правку к текущему состоянию doc_to_modify
-                        # Функция modify_docx теперь работает с уже потенциально измененным doc_object
                         success_this_edit = modify_docx(doc_to_modify, old_text, new_text)
                         
                         if success_this_edit:
                             any_modification_successful = True
-                            st.session_state.info_messages.append(f"  Правка {i+1} успешно применена.")
+                            # Сообщение о успехе уже выводится из modify_docx
                         else:
+                            # Сообщение о неудаче уже выводится из modify_docx
+                            # Можно добавить более общее сообщение тут, если нужно
                             st.session_state.warning_messages.append(
-                                f"  Правка {i+1} («{old_text}» -> «{new_text}»): исходный текст не найден в документе."
+                                f"  Правка «{old_text}» -> «{new_text}» не была применена (текст не найден или не изменен)."
                             )
 
                     if any_modification_successful:
-                        st.session_state.info_messages.append("Все применимые изменения внесены!")
+                        st.session_state.info_messages.append("Обработка завершена. Проверьте документ.")
                         
                         bio = BytesIO()
-                        doc_to_modify.save(bio) # Сохраняем ИТОГОВЫЙ документ
+                        doc_to_modify.save(bio)
                         bio.seek(0)
                         
                         st.session_state.modified_doc_bytes = bio.getvalue()
                         st.session_state.original_file_name = uploaded_file.name
                     else:
-                        if not st.session_state.warning_messages: # Если не было specific warnings
-                            st.session_state.warning_messages.append(
-                                "Ни одна из предложенных LLM правок не была применена (текст не найден)."
+                        if not st.session_state.warning_messages and not st.session_state.info_messages: # Если LLM ничего не вернула
+                             st.session_state.warning_messages.append(
+                                "Не было предложено или применено никаких изменений."
                             )
+                        elif not any_modification_successful and llm_instructions: # LLM предложила, но ничего не применилось
+                             st.session_state.warning_messages.append(
+                                "Ни одна из предложенных LLM правок не была применена (текст не найден в документе)."
+                            )
+
+
                 st.session_state.processing_done = True
 
             except Exception as e:
-                st.session_state.error_message = f"Произошла ошибка: {e}"
+                st.session_state.error_message = f"Произошла критическая ошибка: {e}"
                 import traceback
                 st.session_state.error_message += f"\n\nTraceback:\n{traceback.format_exc()}"
             
@@ -124,11 +137,16 @@ if st.button("3. Обработать документ", key="process_button"):
 if st.session_state.error_message:
     st.error(st.session_state.error_message)
 
-for msg in st.session_state.warning_messages: # Используем цикл для отображения всех предупреждений
+# Используем set чтобы избежать дублирования сообщений от LLM и от этапа применения
+# (хотя лучше настроить логику вывода сообщений так, чтобы они не дублировались изначально)
+unique_warnings = sorted(list(set(st.session_state.warning_messages)))
+for msg in unique_warnings:
     st.warning(msg)
 
-for msg in st.session_state.info_messages: # Используем цикл для отображения всех инфо-сообщений
+unique_infos = sorted(list(set(st.session_state.info_messages)))
+for msg in unique_infos:
     st.info(msg)
+
 
 if st.session_state.processing_done and st.session_state.modified_doc_bytes:
     st.success("Документ готов к скачиванию.")
@@ -140,6 +158,16 @@ if st.session_state.processing_done and st.session_state.modified_doc_bytes:
         key="download_button"
     )
 elif st.session_state.processing_done and not st.session_state.modified_doc_bytes and \
-     not st.session_state.error_message and not st.session_state.warning_messages and \
-     not st.session_state.info_messages: # Если вообще никаких сообщений не было
+     not st.session_state.error_message and \
+     not (st.session_state.warning_messages or st.session_state.info_messages):
     st.info("Обработка завершена. Не было предложено или применено никаких изменений.")
+
+
+with st.expander("Как это работает?"):
+    st.markdown("""
+    1. Вы загружаете `.docx` файл и пишете текстовый запрос на изменения.
+    2. Текст из документа и ваш запрос передаются LLM.
+    3. LLM анализирует запрос и пытается найти все фрагменты для замены и новый текст.
+    4. Система последовательно применяет каждую правку, сохраняя форматирование.
+    5. Вам предоставляется измененный документ.
+    """)
