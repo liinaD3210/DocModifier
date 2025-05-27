@@ -161,13 +161,3 @@ elif st.session_state.processing_done and not st.session_state.modified_doc_byte
      not st.session_state.error_message and \
      not (st.session_state.warning_messages or st.session_state.info_messages):
     st.info("Обработка завершена. Не было предложено или применено никаких изменений.")
-
-
-with st.expander("Как это работает?"):
-    st.markdown("""
-    1. Вы загружаете `.docx` файл и пишете текстовый запрос на изменения.
-    2. Текст из документа и ваш запрос передаются LLM.
-    3. LLM анализирует запрос и пытается найти все фрагменты для замены и новый текст.
-    4. Система последовательно применяет каждую правку, сохраняя форматирование.
-    5. Вам предоставляется измененный документ.
-    """)
