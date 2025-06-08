@@ -1,0 +1,11 @@
+.venv
+*.docx
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.git
+.gitignore
+docs
+tests
+*.md 

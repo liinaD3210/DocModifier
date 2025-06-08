@@ -1,6 +1,7 @@
 from docx import Document
 from docx.enum.text import WD_COLOR_INDEX
 from docx.text.paragraph import Paragraph # Для type hinting
+from loguru import logger
 
 # --- Функции замены текста в DOCX ---
 
@@ -37,7 +38,7 @@ def _replace_text_in_paragraph_runs_with_highlight(p: Paragraph, old_text: str, 
                para_find_start + len(old_text) <= run_text_start_in_para + len(run.text):
                 # old_text полностью умещается в текущем run и начинается в нем или после его начала
                 # (относительно начала параграфа)
-                print(f"DEBUG (простая замена): old_text ('{old_text}') НАЙДЕН и заменяется в одном run: '{run.text}'")
+                logger.debug(f" (простая замена): old_text ('{old_text}') НАЙДЕН и заменяется в одном run: '{run.text}'")
                 
                 # Заменяем только первое вхождение в этом run, чтобы избежать проблем, если new_text содержит old_text
                 current_run_text = run.text
@@ -72,7 +73,7 @@ def _replace_text_in_paragraph_runs_with_highlight(p: Paragraph, old_text: str, 
             break # Больше нет вхождений old_text в оставшейся части параграфа
 
         overall_modified_in_para = True # Отмечаем, что хотя бы одно изменение будет
-        print(f"DEBUG (сложная замена): old_text ('{old_text}') НАЙДЕН в склеенном тексте параграфа начиная с индекса {start_match_idx}.")
+        logger.debug(f" (сложная замена): old_text ('{old_text}') НАЙДЕН в склеенном тексте параграфа начиная с индекса {start_match_idx}.")
         end_match_idx = start_match_idx + len(old_text)
 
         # Какие run'ы нужно изменить/очистить
@@ -109,7 +110,7 @@ def _replace_text_in_paragraph_runs_with_highlight(p: Paragraph, old_text: str, 
         
         first_run_obj.text = prefix + new_text # Начало замены
         first_run_obj.font.highlight_color = WD_COLOR_INDEX.YELLOW
-        print(f"DEBUG: Заменен текст в Run {first_run_involved_details['index']}. Часть 1: '{first_run_obj.text}'")
+        logger.debug(f": Заменен текст в Run {first_run_involved_details['index']}. Часть 1: '{first_run_obj.text}'")
 
         # Сколько от old_text было "покрыто" вставкой new_text в первый run
         # (с учетом длины префикса, которую мы сохранили)
@@ -129,12 +130,12 @@ def _replace_text_in_paragraph_runs_with_highlight(p: Paragraph, old_text: str, 
             
             if len(current_run_obj.text) <= remaining_old_text_to_remove_len:
                 # Этот run полностью съедается остатком old_text
-                print(f"DEBUG: Очищается полностью Run {current_run_seg['index']}: старый текст '{current_run_obj.text}'")
+                logger.debug(f": Очищается полностью Run {current_run_seg['index']}: старый текст '{current_run_obj.text}'")
                 remaining_old_text_to_remove_len -= len(current_run_obj.text)
                 current_run_obj.text = ""
             else:
                 # Этот run частично съедается, оставляем хвост
-                print(f"DEBUG: Очищается частично Run {current_run_seg['index']}: старый текст '{current_run_obj.text}', удаляем {remaining_old_text_to_remove_len} символов с начала")
+                logger.debug(f": Очищается частично Run {current_run_seg['index']}: старый текст '{current_run_obj.text}', удаляем {remaining_old_text_to_remove_len} символов с начала")
                 current_run_obj.text = current_run_obj.text[remaining_old_text_to_remove_len:]
                 remaining_old_text_to_remove_len = 0
         
@@ -223,9 +224,9 @@ def modify_docx(doc_object: Document, old_text: str, new_text: str) -> bool:
                         overall_modified_for_this_edit = True
         
     if overall_modified_for_this_edit:
-        print(f"DEBUG: Правка ('{old_text}' -> '{new_text}') БЫЛА применена к документу.")
+        logger.debug(f": Правка ('{old_text}' -> '{new_text}') БЫЛА применена к документу.")
     else:
-        print(f"DEBUG: Правка ('{old_text}' -> '{new_text}') НЕ была применена (текст не найден).")
+        logger.debug(f": Правка ('{old_text}' -> '{new_text}') НЕ была применена (текст не найден).")
     return overall_modified_for_this_edit
 
 def extract_text_from_doc(doc_object: Document) -> str:

@@ -1,19 +1,18 @@
-[project]
-name = "streamlit-test"
+[tool.poetry]
+name = "doc-modifier"
 version = "0.1.0"
 description = "test streamlit project"
-authors = [
-    {name = "vodenikov.daniil@yandex.ru"}
-]
+authors = ["vodenikov.daniil@yandex.ru"]
 readme = "README.md"
-requires-python = ">=3.11"
-dependencies = [
-    "streamlit (>=1.45.1,<2.0.0)",
-    "google-generativeai (>=0.8.5,<0.9.0)",
-    "python-dotenv (>=1.1.0,<2.0.0)",
-    "python-docx (>=1.1.2,<2.0.0)",
-]
+package-mode = false
 
+[tool.poetry.dependencies]
+python = ">=3.11,<3.12"
+streamlit = ">=1.45.1,<2.0.0"
+google-generativeai = ">=0.8.5,<0.9.0"
+python-dotenv = ">=1.1.0,<2.0.0"
+python-docx = ">=1.1.2,<2.0.0"
+loguru = "^0.7.3"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

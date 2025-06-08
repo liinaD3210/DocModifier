@@ -1,0 +1,19 @@
+services:
+  docmodifier:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cr.yandex/crpg2rfe9anbhi4rem21/docmodifier:${TAG}
+    container_name: docmodifier
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    restart: unless-stopped
+    # Add healthcheck
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s 

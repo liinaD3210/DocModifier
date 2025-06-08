@@ -1,22 +1,8 @@
 import streamlit as st
 from docx import Document
 from io import BytesIO
-import os
-
-# Импорт из новых модулей
-try:
-    from core.llm_handler import get_llm_instructions_list
-    from core.docx_modifier import modify_docx, extract_text_from_doc
-except ImportError as e:
-    st.error(f"Ошибка импорта модулей из 'core': {e}. "
-             "Убедитесь, что папка 'core' существует и содержит __init__.py, "
-             "llm_handler.py, docx_modifier.py.")
-    st.write(f"Текущая рабочая директория: {os.getcwd()}")
-    st.write(f"Содержимое CWD: {os.listdir('.')}")
-    if os.path.exists('core'):
-        st.write(f"Содержимое core: {os.listdir('core')}")
-    st.stop()
-
+from core.llm_handler import get_llm_instructions_list
+from core.docx_modifier import modify_docx, extract_text_from_doc
 # --- Остальной код app.py остается таким же, как в вашем предыдущем варианте ---
 # (где обрабатывается список инструкций и вызывается modify_docx для каждой)
 
