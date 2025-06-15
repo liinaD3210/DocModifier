@@ -1,121 +1,116 @@
-import os
-import json
-from dotenv import load_dotenv
-import google.generativeai as genai
+# core/llm_handler.py
+from langgraph.graph import StateGraph, END
 from loguru import logger
+import os
 
-# Загрузка переменных окружения из .env файла
-# Лучше делать это один раз при старте приложения, но для простоты модуля оставим тут.
-# В более крупных проектах это можно вынести в главный модуль или config.
-load_dotenv()
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+from .state import GraphState
+# ИЗМЕНЕНИЕ 1: Импортируем новые узлы
+from .graph_nodes import (
+    categorize_request_node,
+    extract_replacement_details_node,
+    extract_insertion_details_node,
+    extract_deletion_details_node,   # <--- ДОБАВЛЕНО
+    extract_formatting_details_node, # <--- ДОБАВЛЕНО
+    clarification_node,
+    unknown_operation_node,
+    tool_execution_node,
+)
 
-try:
-    genai.configure(api_key=GOOGLE_API_KEY)
-except Exception as e:
-    logger.error(f"при конфигурации Gemini API: {e}")
-    GOOGLE_API_KEY = None # Сбрасываем, чтобы перейти в режим заглушки
-
-def get_llm_instructions_list(doc_content_text: str, user_query: str) -> list[dict] | None:
-    """
-    Обращается к Google Gemini API для получения списка инструкций по замене текста.
-
-    Args:
-        doc_content_text (str): Текстовое содержимое документа.
-        user_query (str): Запрос пользователя, который может содержать несколько правок.
-
-    Returns:
-        list[dict] | None: Список словарей {"old_text": ..., "new_text": ...} или None.
-    """
-
-    model_name = "gemini-2.0-flash"
-    generation_config = {"response_mime_type": "application/json"}
+# --- Маршрутизация ---
+def route_after_categorization(state: GraphState):
+    category = state.get("next_node_to_call")
+    logger.info(f"Маршрутизация после категоризации, категория: {category}")
     
-    try:
-        model = genai.GenerativeModel(model_name, generation_config=generation_config)
-    except Exception as e:
-        logger.error(f"при создании модели Gemini ({model_name}): {e}")
-        return None # Не можем продолжить без модели
+    # ИЗМЕНЕНИЕ 2: Добавляем маршруты для новых категорий
+    if category == "REPLACE_TEXT":
+        return "extract_replacement_details"
+    elif category == "INSERT_TEXT":
+        return "extract_insertion_details"
+    elif category == "DELETE_ELEMENT":        # <--- ДОБАВЛЕНО
+        return "extract_deletion_details"     # <--- ДОБАВЛЕНО
+    elif category == "APPLY_FORMATTING":      # <--- ДОБАВЛЕНО
+        return "extract_formatting_details"   # <--- ДОБАВЛЕНО
+    elif category == "CLARIFICATION_NEEDED":
+        return "clarification_handler"
+    elif category == "UNKNOWN_OPERATION":
+        return "unknown_operation_handler"
+    else:
+        logger.warning(f"Неизвестная или необработанная категория для маршрутизации: {category}")
+        return "unknown_operation_handler"
 
-    prompt = f"""
-Тебе предоставлен текст документа и запрос пользователя на внесение одного или НЕСКОЛЬКИХ изменений.
-Твоя задача - для КАЖДОГО запрошенного изменения точно определить:
-1. Фрагмент текста в документе, который нужно заменить (`old_text`).
-2. Текст, на который его нужно заменить (`new_text`).
+def route_after_extraction(state: GraphState):
+    # Эта функция универсальна и не требует изменений
+    if state.get("extracted_instructions"):
+        return "tool_executor"
+    else:
+        return END
 
-Очень важно:
-- `old_text` должен быть ТОЧНЫМ фрагментом из документа, включая регистр, знаки препинания и пробелы.
-- Если для какого-то конкретного изменения ты не можешь точно определить `old_text` или `new_text`, пропусти это изменение, но обработай остальные.
-- Если не найдено ни одного изменения, верни пустой список.
+# --- Построение графа ---
+def build_graph():
+    """Собирает и компилирует граф LangGraph."""
+    workflow = StateGraph(GraphState)
 
-Текст документа (фрагмент для анализа):
----
-{doc_content_text[:15000]} 
----
-Запрос пользователя: "{user_query}"
+    # ИЗМЕНЕНИЕ 3: Добавляем новые узлы в граф
+    workflow.add_node("categorize_request", categorize_request_node)
+    workflow.add_node("extract_replacement_details", extract_replacement_details_node)
+    workflow.add_node("extract_insertion_details", extract_insertion_details_node)
+    workflow.add_node("extract_deletion_details", extract_deletion_details_node)   # <--- ДОБАВЛЕНО
+    workflow.add_node("extract_formatting_details", extract_formatting_details_node) # <--- ДОБАВЛЕНО
+    workflow.add_node("clarification_handler", clarification_node)
+    workflow.add_node("unknown_operation_handler", unknown_operation_node)
+    workflow.add_node("tool_executor", tool_execution_node)
 
-Верни результат строго в формате JSON-массива объектов. Каждый объект должен содержать ключи "old_text" и "new_text".
-Если изменение невозможно определить, `old_text` или `new_text` могут быть `null` для этого конкретного изменения, или объект может быть пропущен.
-Предпочтительно пропускать объект, если `old_text` не найден или пуст.
+    workflow.set_entry_point("categorize_request")
 
-Пример формата ответа для нескольких изменений:
-[
-  {{"old_text": "точный текст первой замены", "new_text": "новый текст первой замены"}},
-  {{"old_text": "точный текст второй замены", "new_text": "новый текст второй замены"}}
-]
-
-Пример формата ответа для одного изменения:
-[
-  {{"old_text": "существующий текст", "new_text": "текст для замены"}}
-]
-
-Пример формата ответа, если ничего не найдено или не понято:
-[]
-
-Проанализируй текст документа и запрос пользователя, и предоставь JSON-массив.
-Убедись, что `old_text` включает всю пунктуацию, как в оригинальном тексте, включая точки, запятые и т.д. в конце фрагмента, если они там есть.
-"""
-
-    logger.info(f"\n--- Отправка запроса в Gemini API ({model_name}) для нескольких правок ---")
-    logger.info(f"Запрос пользователя: {user_query}")
+    # Условные ребра для первого шага
+    workflow.add_conditional_edges(
+        "categorize_request",
+        route_after_categorization,
+        {
+            "extract_replacement_details": "extract_replacement_details",
+            "extract_insertion_details": "extract_insertion_details",
+            "extract_deletion_details": "extract_deletion_details",     # <--- ДОБАВЛЕНО
+            "extract_formatting_details": "extract_formatting_details", # <--- ДОБАВЛЕНО
+            "clarification_handler": "clarification_handler",
+            "unknown_operation_handler": "unknown_operation_handler",
+        }
+    )
     
-    try:
-        response = model.generate_content(prompt)
+    # ИЗМЕНЕНИЕ 4: Добавляем ребра для новых узлов, используя тот же роутер
+    workflow.add_conditional_edges("extract_replacement_details", route_after_extraction, {"tool_executor": "tool_executor", END: END})
+    workflow.add_conditional_edges("extract_insertion_details", route_after_extraction, {"tool_executor": "tool_executor", END: END})
+    workflow.add_conditional_edges("extract_deletion_details", route_after_extraction, {"tool_executor": "tool_executor", END: END}) # <--- ДОБАВЛЕНО
+    workflow.add_conditional_edges("extract_formatting_details", route_after_extraction, {"tool_executor": "tool_executor", END: END}) # <--- ДОБАВЛЕНО
+
+    # Прямые ребра
+    workflow.add_edge("tool_executor", END)
+    workflow.add_edge("clarification_handler", END)
+    workflow.add_edge("unknown_operation_handler", END)
+
+    app_graph = workflow.compile()
+    return app_graph
+
+# --- Блок для отладки ---
+if __name__ == "__main__":
+    if not os.getenv("GOOGLE_API_KEY"):
+        print("Ошибка: Переменная окружения GOOGLE_API_KEY не установлена.")
+        exit()
         
-        logger.info("--- Ответ от Gemini API (сырой текст) ---")
-        logger.info(response.text) 
-
-        parsed_response = json.loads(response.text)
-        
-        logger.info("--- Ответ от Gemini API (распарсенный JSON) ---")
-        logger.info(parsed_response)
-
-        if isinstance(parsed_response, list):
-            valid_instructions = []
-            for item in parsed_response:
-                if (isinstance(item, dict) and 
-                    item.get("old_text") and # Проверяем, что old_text не None и не пустая строка
-                    item.get("new_text") is not None): # new_text может быть пустой строкой (удаление)
-                    valid_instructions.append({
-                        "old_text": str(item["old_text"]),
-                        "new_text": str(item["new_text"])
-                    })
-                else:
-                    logger.warning(f"Пропущен некорректный элемент от LLM: {item}")
-            return valid_instructions if valid_instructions else None
-        else:
-            logger.warning(f"LLM вернула не список, а {type(parsed_response)}.")
-            return None
-
-    except json.JSONDecodeError as e:
-        logger.error(f"декодирования JSON ответа от Gemini: {e}")
-        logger.info(f"Полученный текст: {response.text if 'response' in locals() else 'Ответ не получен'}")
-        return None
-    except Exception as e:
-        logger.error(f"при взаимодействии с Gemini API: {e}")
-        if hasattr(e, 'candidates') and response.candidates and not response.candidates[0].content:
-             # Это может быть из-за safety settings или других проблем с генерацией
-             logger.info(f"Ответ Gemini не содержит контента. Prompt feedback: {response.prompt_feedback if hasattr(response, 'prompt_feedback') else 'N/A'}")
-        elif hasattr(e, 'response') and hasattr(e.response, 'prompt_feedback'): # Для некоторых старых версий SDK
-            logger.info(f"Prompt Feedback: {e.response.prompt_feedback}")
-        return None
+    graph = build_graph()
+    
+    initial_state = GraphState(
+        original_user_query="Замени Х на У в документе.",
+        current_user_query="Замени Х на У в документе.",
+        document_content_text="Это тестовый документ. В нем есть Х, который нужно заменить.",
+        document_bytes=b"some doc bytes",
+        extracted_instructions=None,
+        clarification_question=None,
+        system_message=None,
+        next_node_to_call=None
+    )
+    
+    final_state = graph.invoke(initial_state, {"recursion_limit": 10})
+    
+    print("\n--- Конечное состояние графа ---")
+    for key, value in final_state.items():
+        print(f"{key}: {value}")
