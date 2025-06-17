@@ -27,7 +27,6 @@ st.set_page_config(
 def get_graph():
     try:
         graph = build_graph()
-        st.toast("✅ Граф LangGraph успешно инициализирован.")
         return graph
     except Exception as e:
         st.error(f"Не удалось инициализировать LangGraph: {e}")
@@ -58,8 +57,7 @@ init_session_state()
 
 def get_diff_for_instruction(instruction: dict, doc: Document) -> dict:
     """
-    Готовит "было/стало" с выделением изменяемого фрагмента и тусклым контекстом.
-    Возвращает строки, готовые для st.markdown.
+    ФИНАЛЬНАЯ ВЕРСИЯ: Готовит "было/стало" с HTML-выделением изменений и тусклым контекстом из слов.
     """
     result = {'before': 'Ошибка', 'after': 'Ошибка', 'notes': 'Не удалось обработать правку.', 'found': False}
     
@@ -83,69 +81,90 @@ def get_diff_for_instruction(instruction: dict, doc: Document) -> dict:
             result['notes'] = 'LLM не предоставила достаточно данных для поиска.'
             return result
 
-        all_paragraphs = list(doc.paragraphs)
-        target_index = -1
-        for i, p in enumerate(all_paragraphs):
-            if search_text in p.text:
-                target_index = i
+        full_text_str = "\n".join([p.text for p in doc.paragraphs])
+        all_words = full_text_str.split()
+        search_words = search_text.split()
+        target_word_start_index = -1
+        for i in range(len(all_words) - len(search_words) + 1):
+            if all_words[i:i+len(search_words)] == search_words:
+                target_word_start_index = i
                 break
-        
-        if target_index == -1:
+
+        if target_word_start_index == -1:
             result['notes'] = f'Текст «{html.escape(search_text)}» не был найден.'
             return result
-            
-        context_window = 1
-        start_idx = max(0, target_index - context_window)
-        end_idx = min(len(all_paragraphs), target_index + context_window + 1)
         
-        before_md_parts, after_md_parts = [], []
+        target_word_end_index = target_word_start_index + len(search_words)
+        context_words_count = 30
+        start_idx = max(0, target_word_start_index - context_words_count)
+        end_idx = min(len(all_words), target_word_end_index + context_words_count)
+        
+        words_before_context = all_words[start_idx:target_word_start_index]
+        words_of_target = all_words[target_word_start_index:target_word_end_index]
+        words_after_context = all_words[target_word_end_index:end_idx]
+        
+        # --- Новая логика для генерации HTML ---
+        
+        # Стили
+        style_context = "opacity: 0.6;"
+        style_highlight_before = "background-color: #502020; color: #FFD0D0; padding: 2px 4px; border-radius: 4px;"
+        style_highlight_after = "background-color: #204020; color: #D0FFD0; padding: 2px 4px; border-radius: 4px;"
+        style_highlight_format = "background-color: #103050; color: #D0E0FF; padding: 2px 4px; border-radius: 4px;"
+        
+        # Экранируем все текстовые части для безопасности
+        escaped_context_before = html.escape(" ".join(words_before_context))
+        escaped_target = html.escape(" ".join(words_of_target))
+        escaped_context_after = html.escape(" ".join(words_after_context))
+
+        # Собираем строку "Было"
+        result['before'] = (
+            f"<span style='{style_context}'>...{escaped_context_before}</span> "
+            f"<span style='{style_highlight_before}'>{escaped_target}</span> "
+            f"<span style='{style_context}'>{escaped_context_after}...</span>"
+        )
+        
+        # Моделируем и собираем строку "Стало"
         notes = ""
+        after_html = ""
+
+        if op_type == "REPLACE_TEXT":
+            old, new = params.get("old_text", ""), params.get("new_text", "")
+            escaped_new = html.escape(new)
+            after_html = (
+                f"<span style='{style_context}'>...{escaped_context_before}</span> "
+                f"<span style='{style_highlight_after}'>{escaped_new}</span> "
+                f"<span style='{style_context}'>{escaped_context_after}...</span>"
+            )
+            notes = f"Замена '{old}' на '{new}'."
+        elif op_type == "INSERT_TEXT":
+            to_insert = params.get("text_to_insert", "")
+            escaped_insert = html.escape(to_insert)
+            after_html = (
+                f"<span style='{style_context}'>...{escaped_context_before}</span> "
+                f"{escaped_target} <span style='{style_highlight_after}'>{escaped_insert}</span> "
+                f"<span style='{style_context}'>{escaped_context_after}...</span>"
+            )
+            notes = f"Вставка текста: «{to_insert}»"
+        elif op_type == "DELETE_ELEMENT":
+            after_html = (
+                 f"<span style='{style_context}'>...{escaped_context_before}</span> "
+                 f"<span style='text-decoration: line-through; {style_context}'> (удалено) </span> "
+                 f"<span style='{style_context}'>{escaped_context_after}...</span>"
+            )
+            notes = "Полное удаление этого фрагмента."
+        elif op_type == "APPLY_FORMATTING":
+            after_html = (
+                f"<span style='{style_context}'>...{escaped_context_before}</span> "
+                f"<span style='{style_highlight_format}'><i>{escaped_target}</i></span> "
+                f"<span style='{style_context}'>{escaped_context_after}...</span>"
+            )
+            rules_str = [f"`{r.get('style')}`: `{r.get('value')}`" for r in params.get("formatting_rules", [])]
+            notes = f"Будет применено форматирование: {', '.join(rules_str)}"
+        else:
+            after_html = result['before'] # Если не знаем, как показать, показываем как было
         
-        # CSS стиль для тусклого контекста
-        context_style = "opacity: 0.6;"
-
-        for i in range(start_idx, end_idx):
-            p = all_paragraphs[i]
-            is_target_p = (i == target_index)
-            
-            if is_target_p:
-                text_before = p.text
-                text_after, notes = "", ""
-                
-                # Моделируем "после" и заметки
-                if op_type == "REPLACE_TEXT":
-                    old, new = params.get("old_text", ""), params.get("new_text", "")
-                    text_after = text_before.replace(old, f"**{new}**") # Используем Markdown для выделения
-                    notes = f"Замена '{old}' на '{new}'."
-                elif op_type == "INSERT_TEXT":
-                    to_insert = params.get("text_to_insert", "")
-                    if params.get("position") == "after_paragraph":
-                        text_after = text_before
-                        notes = f"ПОСЛЕ этого абзаца будет вставлен новый: «{to_insert}»"
-                    else:
-                        text_after = text_before + f" **{to_insert}**"
-                        notes = f"Вставка текста: «{to_insert}»"
-                elif op_type == "DELETE_ELEMENT":
-                    text_after = f"~~{text_before}~~" # Markdown для зачеркивания
-                    notes = "Полное удаление этого абзаца."
-                elif op_type == "APPLY_FORMATTING":
-                    text_after = text_before
-                    rules_str = [f"`{r.get('style')}`: `{r.get('value')}`" for r in params.get("formatting_rules", [])]
-                    notes = f"Будет применено форматирование: {', '.join(rules_str)}"
-
-                # Добавляем целевой абзац без тусклого стиля
-                before_md_parts.append(text_before)
-                after_md_parts.append(text_after)
-                result['notes'] = notes
-            else:
-                # Добавляем контекстные абзацы с тусклым стилем
-                context_text = html.escape(p.text)
-                md_text = f"<span style='{context_style}'>{context_text}</span>"
-                before_md_parts.append(md_text)
-                after_md_parts.append(md_text)
-
-        result['before'] = "<br><br>".join(before_md_parts)
-        result['after'] = "<br><br>".join(after_md_parts)
+        result['after'] = after_html
+        result['notes'] = notes
         result['found'] = True
     except Exception as e:
         result['notes'] = f"Ошибка при генерации предпросмотра: {e}"
@@ -187,7 +206,7 @@ def show_confirmation_ui(instructions: list[dict]):
             st.write("🔴 **Было:**")
             st.markdown(f"<div style='{container_style}'>{diff['before']}</div>", unsafe_allow_html=True)
             
-            st.write("🟢 **Станет:**")
+            st.write("🟢 **Стало:**")
             st.markdown(f"<div style='{container_style}'>{diff['after']}</div>", unsafe_allow_html=True)
             
             if diff['notes']:
@@ -197,7 +216,7 @@ def show_confirmation_ui(instructions: list[dict]):
 
     st.markdown("---")
     apply_col, cancel_col, _ = st.columns([2, 1, 3])
-    if apply_col.button("✅ Применить выбранные правки", use_container_width=True, type="primary"):
+    if apply_col.button("✅ Применить выбранные правки", use_container_width=True):
         handle_user_confirmation(approved=True)
     if cancel_col.button("❌ Отклонить все", use_container_width=True):
         handle_user_confirmation(approved=False)
@@ -288,6 +307,12 @@ with st.sidebar:
             st.download_button("⬇️ Скачать текущий документ", st.session_state.current_doc_bytes,
                 f"modified_{st.session_state.original_file_name}", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 use_container_width=True, disabled=st.session_state.processing)
+
+    st.divider()
+    st.caption("**Proof of Concept (v0.1)**") # Используем st.caption для заголовка
+    st.caption("""
+    Это демонстрационная версия, подтверждающая основную концепцию. Возможны ошибки и неточности. Проект открыт для дальнейших доработок и улучшения.
+    """)
 
 if not st.session_state.original_file_name:
     st.info("👈 Пожалуйста, загрузите .docx документ на боковой панели, чтобы начать.")

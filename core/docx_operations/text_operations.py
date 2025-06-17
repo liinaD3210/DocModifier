@@ -11,66 +11,82 @@ from ..docx_utils import find_paragraphs_with_text, find_runs_with_text # Исп
 # или в docx_utils.py, если она достаточно общая.
 # Давайте предположим, что она остается здесь, так как тесно связана с заменой.
 def _replace_text_in_paragraph_runs_with_highlight(p: Paragraph, old_text: str, new_text: str) -> bool:
-    # ... (ваш существующий код _replace_text_in_paragraph_runs_with_highlight) ...
-    # Убедитесь, что WD_COLOR_INDEX импортирован здесь или доступен.
-    modified_paragraph = False
-    if not old_text or old_text not in p.text: return False
+    """
+    Находит и заменяет текст в абзаце, который может быть разбит на несколько 'runs'.
+    Версия без подсветки.
+    """
+    if not old_text or old_text not in p.text:
+        return False
+
     runs = p.runs
-    # Простая замена
+    
+    # --- Простая замена (если весь old_text находится в одном run) ---
     for i, run in enumerate(runs):
         if old_text in run.text:
+            # Проверяем, что это не просто часть совпадения, разбросанного по нескольким run'ам
             run_text_start_in_para = sum(len(r.text) for r in runs[:i])
             para_find_start = p.text.find(old_text)
+            
+            # Если начальная позиция совпадения в полном тексте абзаца находится внутри текущего run'а
             if para_find_start >= run_text_start_in_para and \
                para_find_start + len(old_text) <= run_text_start_in_para + len(run.text):
-                logger.debug(f" (простая замена): old_text ('{old_text}') НАЙДЕН и заменяется в одном run: '{run.text}'")
+                
+                logger.debug(f" (простая замена): old_text ('{old_text}') найден и заменяется в одном run: '{run.text}'")
                 current_run_text = run.text
                 start_replace_index = current_run_text.find(old_text)
-                if start_replace_index != -1 :
+                
+                if start_replace_index != -1:
                     end_replace_index = start_replace_index + len(old_text)
                     run.text = current_run_text[:start_replace_index] + new_text + current_run_text[end_replace_index:]
-                    try: run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                    except Exception as e_highlight: logger.warning(f"Не удалось применить цвет выделения: {e_highlight}")
+                    # СТРОКА С ПОДСВЕТКОЙ УДАЛЕНА
                     return True
-    # Сложная замена (ваш код)
+    
+    # --- Сложная замена (если old_text разбит на несколько run'ов) ---
     current_pos = 0
-    text_segments = [] 
+    text_segments = []
     para_full_text = ""
     for i, run_obj_iter in enumerate(runs):
         text_segments.append({'index': i, 'start_pos': current_pos, 'text': run_obj_iter.text, 'obj': run_obj_iter})
         para_full_text += run_obj_iter.text
         current_pos += len(run_obj_iter.text)
+        
     start_match_idx = para_full_text.find(old_text)
     if start_match_idx != -1:
-        # ... (остальная логика сложной замены) ...
-        # (этот блок нужно скопировать из вашего предыдущего полного docx_modifier.py)
-         end_match_idx = start_match_idx + len(old_text)
-         first_run_involved_details = None
-         for seg in text_segments:
-             if seg['start_pos'] <= start_match_idx < (seg['start_pos'] + len(seg['text'])):
-                 first_run_involved_details = seg
-                 break
-         if first_run_involved_details:
-             first_run_obj = first_run_involved_details['obj']
-             offset_in_first_run = start_match_idx - first_run_involved_details['start_pos']
-             prefix = first_run_obj.text[:offset_in_first_run]
-             len_old_text_in_first_run_after_prefix = len(first_run_involved_details['text']) - offset_in_first_run
-             first_run_obj.text = prefix + new_text
-             try: first_run_obj.font.highlight_color = WD_COLOR_INDEX.YELLOW
-             except Exception as e_highlight: logger.warning(f"Не удалось применить цвет выделения: {e_highlight}")
-             remaining_old_text_to_remove_len = len(old_text) - len_old_text_in_first_run_after_prefix
-             if remaining_old_text_to_remove_len < 0: remaining_old_text_to_remove_len = 0 
-             for k in range(first_run_involved_details['index'] + 1, len(text_segments)):
-                 if remaining_old_text_to_remove_len <= 0: break
-                 current_run_seg = text_segments[k]
-                 current_run_obj = current_run_seg['obj']
-                 if len(current_run_obj.text) <= remaining_old_text_to_remove_len:
-                     remaining_old_text_to_remove_len -= len(current_run_obj.text)
-                     current_run_obj.text = ""
-                 else:
-                     current_run_obj.text = current_run_obj.text[remaining_old_text_to_remove_len:]
-                     remaining_old_text_to_remove_len = 0
-             return True
+        end_match_idx = start_match_idx + len(old_text)
+        first_run_involved_details = None
+        
+        for seg in text_segments:
+            if seg['start_pos'] <= start_match_idx < (seg['start_pos'] + len(seg['text'])):
+                first_run_involved_details = seg
+                break
+        
+        if first_run_involved_details:
+            first_run_obj = first_run_involved_details['obj']
+            offset_in_first_run = start_match_idx - first_run_involved_details['start_pos']
+            prefix = first_run_obj.text[:offset_in_first_run]
+            len_old_text_in_first_run_after_prefix = len(first_run_involved_details['text']) - offset_in_first_run
+            
+            first_run_obj.text = prefix + new_text
+            # СТРОКА С ПОДСВЕТКОЙ УДАЛЕНА
+            
+            remaining_old_text_to_remove_len = len(old_text) - len_old_text_in_first_run_after_prefix
+            if remaining_old_text_to_remove_len < 0:
+                remaining_old_text_to_remove_len = 0
+            
+            for k in range(first_run_involved_details['index'] + 1, len(text_segments)):
+                if remaining_old_text_to_remove_len <= 0:
+                    break
+                current_run_seg = text_segments[k]
+                current_run_obj = current_run_seg['obj']
+                if len(current_run_obj.text) <= remaining_old_text_to_remove_len:
+                    remaining_old_text_to_remove_len -= len(current_run_obj.text)
+                    current_run_obj.text = ""
+                else:
+                    current_run_obj.text = current_run_obj.text[remaining_old_text_to_remove_len:]
+                    remaining_old_text_to_remove_len = 0
+            
+            return True
+            
     return False
 
 
