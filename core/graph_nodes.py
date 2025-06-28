@@ -119,9 +119,19 @@ def extract_deletion_details_node(state: GraphState) -> GraphState:
     user_query = state["current_user_query"]
     doc_text = state["document_content_text"][:15000]
 
+    # Добавим проверки типов
+    if not isinstance(user_query, str):
+        logger.error(f"user_query не является строкой: {type(user_query)}")
+        state["system_message"] = "Внутренняя ошибка: неверный тип запроса."
+        return state
+    if not isinstance(doc_text, str): # Проверяем уже укороченный текст
+        logger.error(f"doc_text не является строкой: {type(state['document_content_text'])}")
+        state["system_message"] = "Внутренняя ошибка: неверный тип контента документа."
+        return state
+    
     prompt = prompts.EXTRACT_DELETION_DETAILS_PROMPT.format(
-        doc_text=doc_text,
-        user_query=user_query
+         doc_text=doc_text,
+         user_query=user_query
     )
     response_json_list = invoke_gemini_json_mode(prompt)
 

@@ -9,33 +9,81 @@ from loguru import logger
 from ..docx_utils import find_paragraphs_with_text, get_table_by_description # Относительный импорт
 
 def handle_delete_element(doc: Document, target_description: dict, parameters: dict) -> bool:
-    # ... (ваш существующий код _handle_delete_element, использующий find_paragraphs_with_text и get_table_by_description) ...
     logger.info(f"Выполнение DELETE_ELEMENT: target={target_description}")
     target_text = target_description.get("text_to_find")
     element_type = target_description.get("element_type")
 
-    if not element_type: logger.warning("DELETE_ELEMENT: 'element_type' не указан."); return False
-    if not target_text and element_type not in ["table"]: # Для таблицы можно по индексу
+    if not element_type:
+        logger.warning("DELETE_ELEMENT: 'element_type' не указан.")
+        return False
+    if not target_text and element_type not in ["table"]:
          if not (element_type.startswith("table_") and target_description.get("table_index") is not None):
-             logger.warning(f"DELETE_ELEMENT: 'text_to_find' не указан для '{element_type}'."); return False
+            logger.warning(f"DELETE_ELEMENT: 'text_to_find' не указан для типа '{element_type}'.")
+            return False
 
     if element_type == "paragraph":
-        paragraphs_to_delete = find_paragraphs_with_text(doc, target_text) # Ищет везде
-        if not paragraphs_to_delete: logger.warning(f"DELETE_ELEMENT: Абзац(ы) '{target_text}' не найдены."); return False
-        for p_del in paragraphs_to_delete:
-            element = p_del._element
-            if element.getparent() is not None: element.getparent().remove(element)
-        logger.info(f"DELETE_ELEMENT: Удалено {len(paragraphs_to_delete)} абзац(ев) с '{target_text}'.")
-        return True
-    elif element_type == "table":
-        table_to_delete = get_table_by_description(doc, target_description)
-        if table_to_delete:
-            tbl_element = table_to_delete._element
-            if tbl_element.getparent() is not None: tbl_element.getparent().remove(tbl_element)
-            logger.info(f"DELETE_ELEMENT: Таблица '{target_description}' удалена.")
+        logger.debug(f"Поиск абзацев для удаления. text_to_find='{target_text}'")
+        
+        # Сначала пытаемся найти по полному совпадению (с учетом strip)
+        paragraphs_found = find_paragraphs_with_text(doc, target_text, partial_match=False)
+        # Расширяем поиск на колонтитулы и таблицы
+        for section in doc.sections:
+            paragraphs_found.extend(find_paragraphs_with_text(section.header, target_text, partial_match=False))
+            paragraphs_found.extend(find_paragraphs_with_text(section.footer, target_text, partial_match=False))
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    paragraphs_found.extend(find_paragraphs_with_text(cell, target_text, partial_match=False))
+        
+        unique_paragraphs_to_delete = list(dict.fromkeys(paragraphs_found))
+
+        if not unique_paragraphs_to_delete:
+            logger.info(f"Точное совпадение для '{target_text}' не найдено. Попытка частичного совпадения (partial_match=True).")
+            paragraphs_found_partial = []
+            paragraphs_found_partial.extend(find_paragraphs_with_text(doc, target_text, partial_match=True))
+            for section in doc.sections:
+                paragraphs_found_partial.extend(find_paragraphs_with_text(section.header, target_text, partial_match=True))
+                paragraphs_found_partial.extend(find_paragraphs_with_text(section.footer, target_text, partial_match=True))
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        paragraphs_found_partial.extend(find_paragraphs_with_text(cell, target_text, partial_match=True))
+            
+            unique_paragraphs_to_delete = list(dict.fromkeys(paragraphs_found_partial))
+
+            if len(unique_paragraphs_to_delete) > 1:
+                logger.warning(f"DELETE_ELEMENT: Найдено {len(unique_paragraphs_to_delete)} абзацев по частичному совпадению с '{target_text}'. Удаление неоднозначно. Правка не применена.")
+                return False
+            elif not unique_paragraphs_to_delete:
+                logger.warning(f"DELETE_ELEMENT: Абзац(ы) с текстом '{target_text}' не найдены для удаления (ни точно, ни частично).")
+                return False
+        
+        # Если unique_paragraphs_to_delete содержит 1 элемент (или мы решили удалять все найденные по точному совпадению)
+        count_deleted = 0
+        for p_to_delete in unique_paragraphs_to_delete:
+            # ... (логика удаления абзаца) ...
+            element = p_to_delete._element
+            parent = element.getparent()
+            if parent is not None:
+                parent.remove(element)
+                count_deleted += 1
+            else: # ...
+                logger.warning(f"DELETE_ELEMENT: Не удалось найти родителя для удаления абзаца...")
+
+        if count_deleted > 0:
+            logger.info(f"DELETE_ELEMENT: Удалено {count_deleted} абзац(ев) на основе текста '{target_text}'.")
             return True
-        logger.warning(f"DELETE_ELEMENT: Таблица '{target_description}' не найдена."); return False
-    logger.warning(f"DELETE_ELEMENT: Тип '{element_type}' не поддерживается."); return False
+        else:
+            logger.warning(f"DELETE_ELEMENT: Абзац(ы) были найдены, но не удалось удалить ни один.")
+            return False
+
+    # ... (остальная часть функции для "table" и т.д.) ...
+    elif element_type == "table":
+        # ... (ваш существующий код для удаления таблицы) ...
+        pass # Замените на ваш код
+    
+    logger.warning(f"DELETE_ELEMENT: Тип элемента '{element_type}' пока не поддерживается для удаления.")
+    return False
 
 
 def _apply_single_formatting_rule_to_run(run, rule: dict):

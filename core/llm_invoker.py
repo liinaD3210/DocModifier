@@ -4,6 +4,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.exceptions import OutputParserException
 from langchain_google_genai import HarmCategory, HarmBlockThreshold
+from langchain_core.messages import AIMessage
 from loguru import logger
 import json
 import os
@@ -61,9 +62,30 @@ def invoke_gemini_json_mode(prompt: str) -> Any:
 
     try:
         # Шаг 1: Получаем сырой ответ от модели
+        logger.debug(f"Отправка промпта в LLM (начало): {prompt[:200]}...") # Логируем начало промпта
         raw_response = llm.invoke(prompt)
+        
+        logger.debug(f"Тип raw_response от llm.invoke: {type(raw_response)}")
+        if hasattr(raw_response, '__dict__'): # Посмотреть атрибуты, если это объект
+            logger.debug(f"Атрибуты raw_response: {raw_response.__dict__}")
+        else:
+            logger.debug(f"raw_response (repr): {raw_response!r}")
+
+        if not isinstance(raw_response, AIMessage) or not hasattr(raw_response, 'content'):
+            logger.error(f"Неожиданный тип ответа от llm.invoke: {type(raw_response)}. Ожидался AIMessage с атрибутом 'content'.")
+            # Попробуем извлечь текст, если это строка напрямую (маловероятно для invoke)
+            if isinstance(raw_response, str):
+                raw_text_candidate = raw_response
+                logger.warning(f"llm.invoke вернул строку, а не AIMessage: {raw_text_candidate[:200]}...")
+                # В этом случае, возможно, произошла ошибка на стороне LangChain или API
+                # и это текст ошибки, а не контент.
+                # Мы не можем продолжать, если не уверены, что это JSON.
+                return {"error": f"LLM вернула строку вместо ожидаемого объекта: {raw_text_candidate[:100]}"}
+            return {"error": "Неожиданный формат ответа от LLM."}
+        
         raw_text = raw_response.content
-        logger.debug(f"СЫРОЙ ОТВЕТ от LLM перед очисткой: {raw_text!r}")
+        logger.debug(f"Тип raw_response.content (raw_text): {type(raw_text)}")
+        logger.debug(f"СЫРОЙ ОТВЕТ от LLM перед очисткой (raw_text): {raw_text!r}")
 
         # Шаг 2: Очищаем ответ, извлекая только JSON
         json_string = _extract_json_from_string(raw_text)

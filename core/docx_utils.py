@@ -3,32 +3,81 @@ from docx import Document
 from docx.text.paragraph import Paragraph
 from docx.table import Table, _Cell
 from loguru import logger
+from docx.section import _Header, _Footer
+from typing import Union, List
+import sys
 
-def find_paragraphs_with_text(container, text, partial_match=False):
+ContainerType = Union[Document, _Cell, _Header, _Footer, Paragraph]
+
+def find_paragraphs_with_text(container: ContainerType, 
+                              text_to_find: str, 
+                              partial_match: bool = False) -> List[Paragraph]:
     """
     Находит все абзацы в заданном контейнере, содержащие указанный текст.
 
     Args:
-        container: Объект, в котором искать (Document, _Cell, Section.header и т.д.).
-        text (str): Текст для поиска.
-        partial_match (bool): Если True, ищет вхождение текста. 
-                              Если False (по умолчанию), ищет точное совпадение текста абзаца.
+        container: Объект, в котором искать (Document, _Cell, Section.header/footer и т.д.).
+        text_to_find (str): Текст для поиска.
+        partial_match (bool): Если True, ищет вхождение текста (text_to_find in p.text).
+                              Если False (по умолчанию), ищет точное совпадение текста абзаца (p.text == text_to_find).
 
     Returns:
         list[Paragraph]: Список найденных объектов абзацев.
     """
-    if container is None or not hasattr(container, 'paragraphs'):
+    if container is None:
+        logger.trace(f"find_paragraphs_with_text: Контейнер is None, поиск текста '{text_to_find}' невозможен.")
         return []
+    if not hasattr(container, 'paragraphs'):
+        logger.trace(f"find_paragraphs_with_text: Контейнер типа {type(container)} не имеет атрибута 'paragraphs'. Поиск текста '{text_to_find}' невозможен.")
+        return []
+    if not text_to_find: # Проверка на пустой text_to_find
+        logger.trace(f"find_paragraphs_with_text: text_to_find пуст, поиск не выполняется в контейнере {type(container)}.")
+        return []
+
+    logger.trace(f"find_paragraphs_with_text: Поиск '{text_to_find}' в контейнере типа {type(container)}, partial_match={partial_match}")
     
     found_paragraphs = []
-    for p in container.paragraphs:
-        # ИЗМЕНЕНИЕ: Добавлена логика для partial_match
-        if partial_match:
-            if text in p.text:
+    try:
+        for p_idx, p in enumerate(container.paragraphs):
+            p_text_stripped = p.text.strip() # Часто полезно для сравнения без крайних пробелов
+            text_to_find_stripped = text_to_find.strip()
+
+            logger.trace(f"  Проверка абзаца #{p_idx}: repr(p.text)='{repr(p.text)}'")
+            logger.trace(f"    Искомый текст (repr): '{repr(text_to_find)}'")
+            logger.trace(f"    p.text.strip() (repr): '{repr(p_text_stripped)}'")
+            logger.trace(f"    text_to_find.strip() (repr): '{repr(text_to_find_stripped)}'")
+
+            match_found = False
+            if partial_match:
+                if text_to_find in p.text:
+                    logger.debug(f"    ЧАСТИЧНОЕ СОВПАДЕНИЕ НАЙДЕНО: '{text_to_find}' in '{p.text}'")
+                    match_found = True
+                # Дополнительная проверка для частичного совпадения без учета крайних пробелов
+                elif text_to_find_stripped and p_text_stripped and text_to_find_stripped in p_text_stripped:
+                    logger.debug(f"    ЧАСТИЧНОЕ СОВПАДЕНИЕ (со strip) НАЙДЕНО: '{text_to_find_stripped}' in '{p_text_stripped}'")
+                    match_found = True
+            else: # Точное совпадение
+                if p.text == text_to_find:
+                    logger.debug(f"    ТОЧНОЕ СОВПАДЕНИЕ НАЙДЕНО: p.text == '{text_to_find}'")
+                    match_found = True
+                # Дополнительная проверка для точного совпадения без учета крайних пробелов
+                elif p_text_stripped == text_to_find_stripped:
+                    logger.debug(f"    ТОЧНОЕ СОВПАДЕНИЕ (со strip) НАЙДЕНО: p.text.strip() == '{text_to_find_stripped}'")
+                    match_found = True
+            
+            if match_found:
                 found_paragraphs.append(p)
-        else:
-            if p.text == text:
-                found_paragraphs.append(p)
+            else:
+                logger.trace(f"    Совпадение не найдено для абзаца #{p_idx}.")
+                
+    except Exception as e:
+        logger.error(f"find_paragraphs_with_text: Ошибка при итерации по абзацам в контейнере {type(container)}: {e}")
+
+    if found_paragraphs:
+        logger.debug(f"find_paragraphs_with_text: Найдено {len(found_paragraphs)} абзац(ев) с текстом (или его частью) '{text_to_find}'.")
+    else:
+        logger.trace(f"find_paragraphs_with_text: Абзацы с текстом (или его частью) '{text_to_find}' не найдены в контейнере {type(container)}.")
+        
     return found_paragraphs
 
 def find_runs_with_text(paragraph: Paragraph, text_to_find: str) -> list: # list of Run objects
