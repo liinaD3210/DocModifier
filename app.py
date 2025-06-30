@@ -18,7 +18,7 @@ EXAMPLE_DOC_PATH = "example_document.docx" # Убедитесь, что этот
 
 # --- Конфигурация страницы ---
 st.set_page_config(
-    page_title="Агент правок DOCX (LangGraph)",
+    page_title="Агент правок DOCX",
     page_icon="📄",
     layout="wide",
     initial_sidebar_state="expanded"
