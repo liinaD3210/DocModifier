@@ -15,6 +15,7 @@ loguru = "^0.7.3"
 langgraph = "^0.4.8"
 langchain = "^0.3.25"
 langchain-google-genai = "^2.1.5"
+pysocks = "^1.7.1"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
