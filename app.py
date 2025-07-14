@@ -1,7 +1,11 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv() # Эта команда загружает переменные из .env файла
+
 import streamlit as st
 from docx import Document
 from io import BytesIO
-import os
 import json # Оставляем, так как может использоваться в get_diff_for_instruction или format_instruction_for_display
 import html
 # import textwrap # По-прежнему не вижу его использования, можно удалить, если уверены

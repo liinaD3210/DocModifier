@@ -1,8 +1,8 @@
 # Переменные
 REGISTRY = cr.yandex
-REPOSITORY = crpg2rfe9anbhi4rem21
+REPOSITORY = crppmeao829asg7eaf76
 IMAGE_NAME = docmodifier
-TAG ?= 0.0.1
+TAG ?= 0.1
 export TAG 
 FULL_IMAGE = $(REGISTRY)/$(REPOSITORY)/$(IMAGE_NAME):$(TAG)
 

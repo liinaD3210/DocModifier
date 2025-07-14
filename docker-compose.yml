@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: cr.yandex/crpg2rfe9anbhi4rem21/docmodifier:${TAG}
+    image: cr.yandex/crppmeao829asg7eaf76/docmodifier:${TAG}
     container_name: docmodifier
     ports:
       - "8501:8501"
